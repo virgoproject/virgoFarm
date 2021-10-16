@@ -274,6 +274,7 @@ contract VirgoFarm is Context {
     }
     
     function lock(uint256 amount) external returns (bool) {
+        require(_toDistributeThisRound == 0, "A distribution is occuring! Please try again in a few minutes.");
         require(amount >= _minLockAmount, "Lock amount must be greater or equal to minimal lock amount");
         uint256 allowance = _token.allowance(msg.sender, address(this));
         require(allowance >= amount, "Please allow token before locking");
@@ -287,6 +288,7 @@ contract VirgoFarm is Context {
     }
     
     function unlock() external returns (bool) {
+        require(_toDistributeThisRound == 0, "A distribution is occuring! Please try again in a few minutes.");
         require(_balances[msg.sender] > 0, "Balance must not be null");
         require(_lockTime[msg.sender] <= block.number, "Lock not expired yet");
         
@@ -313,8 +315,9 @@ contract VirgoFarm is Context {
     function distribute(uint256 maxIterations) external returns (bool) {
         require(_toDistributeThisRound > 0, "no active round");
         if(_currentIteration.add(maxIterations) > _stackers.length)
+            maxIterations = _stackers.length - _currentIteration;
+            
         
-        for()
     }
     
     function getLocked() external view returns (uint256) {
