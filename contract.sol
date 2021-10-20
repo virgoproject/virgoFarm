@@ -246,6 +246,7 @@ contract VirgoFarm is Context {
     mapping (address => uint256) private _balances;
     mapping (address => uint256) private _lockTimes;
     address[] private _stackers;
+    mapping (address => uint256) private _stackersIds;
     
     IBEP20 constant _token = IBEP20(0xbee5e147e6e40433ff0310f5ae1a66278bc8d678);
     
@@ -256,7 +257,7 @@ contract VirgoFarm is Context {
     uint256 private _toDistributeThisRound = 0;
     uint256 private _currentIteration = 0;
     
-    uint256 constant _baseWeeklyRate = 50; //per 10000
+    uint256 constant _baseWeeklyRate = 48; //per 10000
     uint256 constant _maxPerInterval = 4331500000000;
     uint256 constant _minLockAmount = 100000000000;
     uint256 constant _lockTime = 201600;
@@ -280,9 +281,12 @@ contract VirgoFarm is Context {
         require(allowance >= amount, "Please allow token before locking");
         
         _token.transferFrom(msg.sender, address(this), amount);
+        
         _balances[msg.sender] = _balances[msg.sender].add(amount);
         _lockTime[msg.sender] = block.number.add(_lockTime);
-        _stackers.push(msg.sender);
+        
+        if(!_stackers[msg.sender].exists)
+            _stackers.push(msg.sender);
         
         return true;
     }
@@ -294,6 +298,8 @@ contract VirgoFarm is Context {
         
         _token.transfer(msg.sender, _balances[msg.sender]);
         _balances[msg.sender] = 0;
+        
+        _stackers[msg.sender] = _stackers[]
         
         return true;
     }
