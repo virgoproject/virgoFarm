@@ -285,8 +285,11 @@ contract VirgoFarm is Context {
         _balances[msg.sender] = _balances[msg.sender].add(amount);
         _lockTime[msg.sender] = block.number.add(_lockTime);
         
-        if(!_stackers[msg.sender].exists)
-            _stackers.push(msg.sender);
+        if(_stackersIds[msg.sender] == 0){
+           _stackers.push(msg.sender);
+           _stackersIds(msg.sender) = _stackers.length;
+        }
+            
         
         return true;
     }
@@ -299,7 +302,10 @@ contract VirgoFarm is Context {
         _token.transfer(msg.sender, _balances[msg.sender]);
         _balances[msg.sender] = 0;
         
-        _stackers[msg.sender] = _stackers[]
+        _stackers[_stackersIds[msg.sender]-1] = _stackers[_stackers.length-1];
+        _stackersIds[_stackers[_stackers.length-1]] = _stackersIds[msg.sender];
+        delete _stackersIds[msg.sender];
+        _stackers.pop();
         
         return true;
     }
@@ -307,13 +313,14 @@ contract VirgoFarm is Context {
     function initDistribution() external returns (bool) {
         require(_lastDistribution.add(_distributionInterval) <= block.number, "latest distribution is too recent");
         require(_toDistributeThisRound == 0, "current round not fully distributed");
-        uint256 lockedAmount = getLocked();
-        
-        _toDistributeThisRound = lockedAmount.div(10000.div(_baseWeeklyRate));
+
+        _toDistributeThisRound = getLocked().div(10000.div(_baseWeeklyRate));
         if(_toDistributeThisRound > _maxPerInterval)
             _toDistributeThisRound = _maxPerInterval;
         
         _currentIteration = 0;
+        
+        _lastDistribution = block.number;
         
         return true;
     }
@@ -323,7 +330,17 @@ contract VirgoFarm is Context {
         if(_currentIteration.add(maxIterations) > _stackers.length)
             maxIterations = _stackers.length - _currentIteration;
             
+        for(uint i = 0; i < maxIterations; i++){
+            address holder = _stackers[i];
+            uint256 toDistrib = _balances[holder].mul(_toDistributeThisRound).div(getLocked());
+            _balances[holder] = _balances[holder] + toDistrib;
+        }
         
+        if(_currentIteration.add(maxIterations) == _stackers.length){
+            _toDistribute = _toDistribute - _toDistributeThisRound;
+            _distributed = _distributed + _toDistributeThisRound;
+            _toDistributeThisRound = 0;
+        }
     }
     
     function getLocked() external view returns (uint256) {
