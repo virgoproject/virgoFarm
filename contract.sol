@@ -240,6 +240,31 @@ library SafeMath {
   }
 }
 
+/*
+ * @dev Provides information about the current execution context, including the
+ * sender of the transaction and its data. While these are generally available
+ * via msg.sender and msg.data, they should not be accessed in such a direct
+ * manner, since when dealing with GSN meta-transactions the account sending and
+ * paying for execution may not be the actual sender (as far as an application
+ * is concerned).
+ *
+ * This contract is only required for intermediate, library-like contracts.
+ */
+contract Context {
+  // Empty internal constructor, to prevent people from mistakenly deploying
+  // an instance of this contract, which should be used via inheritance.
+  constructor () internal { }
+
+  function _msgSender() internal view returns (address payable) {
+    return msg.sender;
+  }
+
+  function _msgData() internal view returns (bytes memory) {
+    this; // silence state mutability warning without generating bytecode - see https://github.com/ethereum/solidity/issues/2691
+    return msg.data;
+  }
+}
+
 contract VirgoFarm is Context {
     using SafeMath for uint256;
     
@@ -256,12 +281,45 @@ contract VirgoFarm is Context {
     
     uint256 private _toDistributeThisRound = 0;
     uint256 private _currentIteration = 0;
+    uint256 private _lockedAmount = 0;
     
-    uint256 constant _baseWeeklyRate = 48; //per 10000
+    uint256 constant _perThousand = 1000;
+    uint256 constant _baseWeeklyRate = 5; //per 1000
     uint256 constant _maxPerInterval = 4331500000000;
     uint256 constant _minLockAmount = 100000000000;
-    uint256 constant _lockTime = 201600;
+    uint256 constant _lockTime = 806400;
     uint256 constant _distributionInterval = 201600;
+    
+    constructor() public {}
+    
+
+    function getToDistribute() external view returns (uint256) {
+        return _toDistribute;
+    }
+    
+    function getToDistributeThisRound() external view returns (uint256) {
+        return _toDistributeThisRound;
+    }
+    
+    function getDistributed() external view returns (uint256) {
+        return _distributed;
+    }
+
+    function getLastDistribution() external view returns (uint256) {
+        return _lastDistribution;
+    }
+
+    function getLocked() external view returns (uint256) {
+        return _token.balanceOf(address(this)).sub(_toDistribute);
+    }
+
+    function balanceOf(address account) external view returns (uint256) {
+        return _balances[account];
+    }
+
+    function lockTimeOf(address account) external view returns (uint256) {
+        return _lockTimes[account];
+    }
     
     function addFunds(uint256 amount) external returns (bool) {
         require(amount > 0, "you must send tokens");
@@ -283,21 +341,20 @@ contract VirgoFarm is Context {
         _token.transferFrom(msg.sender, address(this), amount);
         
         _balances[msg.sender] = _balances[msg.sender].add(amount);
-        _lockTime[msg.sender] = block.number.add(_lockTime);
+        _lockTimes[msg.sender] = block.number.add(_lockTime);
         
         if(_stackersIds[msg.sender] == 0){
            _stackers.push(msg.sender);
-           _stackersIds(msg.sender) = _stackers.length;
+           _stackersIds[msg.sender] = _stackers.length;
         }
             
-        
         return true;
     }
     
     function unlock() external returns (bool) {
         require(_toDistributeThisRound == 0, "A distribution is occuring! Please try again in a few minutes.");
         require(_balances[msg.sender] > 0, "Balance must not be null");
-        require(_lockTime[msg.sender] <= block.number, "Lock not expired yet");
+        require(_lockTimes[msg.sender] <= block.number, "Lock not expired yet");
         
         _token.transfer(msg.sender, _balances[msg.sender]);
         _balances[msg.sender] = 0;
@@ -314,7 +371,9 @@ contract VirgoFarm is Context {
         require(_lastDistribution.add(_distributionInterval) <= block.number, "latest distribution is too recent");
         require(_toDistributeThisRound == 0, "current round not fully distributed");
 
-        _toDistributeThisRound = getLocked().div(10000.div(_baseWeeklyRate));
+        _lockedAmount = _token.balanceOf(address(this)).sub(_toDistribute);
+
+        _toDistributeThisRound = _lockedAmount.div(_perThousand.div(_baseWeeklyRate));
         if(_toDistributeThisRound > _maxPerInterval)
             _toDistributeThisRound = _maxPerInterval;
         
@@ -324,26 +383,22 @@ contract VirgoFarm is Context {
         
         return true;
     }
-    
+            
     function distribute(uint256 maxIterations) external returns (bool) {
         require(_toDistributeThisRound > 0, "no active round");
         if(_currentIteration.add(maxIterations) > _stackers.length)
-            maxIterations = _stackers.length - _currentIteration;
+            maxIterations = _stackers.length.sub(_currentIteration);
             
         for(uint i = 0; i < maxIterations; i++){
             address holder = _stackers[i];
-            uint256 toDistrib = _balances[holder].mul(_toDistributeThisRound).div(getLocked());
-            _balances[holder] = _balances[holder] + toDistrib;
+            uint256 toDistrib = _balances[holder].mul(_toDistributeThisRound).div(_lockedAmount);
+            _balances[holder] = _balances[holder].add(toDistrib);
         }
         
         if(_currentIteration.add(maxIterations) == _stackers.length){
-            _toDistribute = _toDistribute - _toDistributeThisRound;
-            _distributed = _distributed + _toDistributeThisRound;
+            _toDistribute = _toDistribute.sub(_toDistributeThisRound);
+            _distributed = _distributed.add(_toDistributeThisRound);
             _toDistributeThisRound = 0;
         }
-    }
-    
-    function getLocked() external view returns (uint256) {
-        return _token.balanceOf(address(this)).sub(_toDistribute);
     }
 }
