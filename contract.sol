@@ -273,7 +273,7 @@ contract VirgoFarm is Context {
     address[] private _stackers;
     mapping (address => uint256) private _stackersIds;
     
-    IBEP20 constant _token = IBEP20(0xbee5e147e6e40433ff0310f5ae1a66278bc8d678);
+    IBEP20 constant _token = IBEP20(0xB97CFCBf76504d23E35cd279d9591112a480A824);
     
     uint256 private _toDistribute = 0;
     uint256 private _distributed = 0;
@@ -351,18 +351,21 @@ contract VirgoFarm is Context {
         return true;
     }
     
-    function unlock() external returns (bool) {
+    function unlock(uint256 amount) external returns (bool) {
         require(_toDistributeThisRound == 0, "A distribution is occuring! Please try again in a few minutes.");
         require(_balances[msg.sender] > 0, "Balance must not be null");
         require(_lockTimes[msg.sender] <= block.number, "Lock not expired yet");
+        require(amount <= _balances[msg.sender], "amount must be inferior or equal to balance");
         
-        _token.transfer(msg.sender, _balances[msg.sender]);
-        _balances[msg.sender] = 0;
+        _token.transfer(msg.sender, amount);
+        _balances[msg.sender] = _balances[msg.sender].sub(amount);
         
-        _stackers[_stackersIds[msg.sender]-1] = _stackers[_stackers.length-1];
-        _stackersIds[_stackers[_stackers.length-1]] = _stackersIds[msg.sender];
-        delete _stackersIds[msg.sender];
-        _stackers.pop();
+        if(_balances[msg.sender] == 0){
+            _stackers[_stackersIds[msg.sender]-1] = _stackers[_stackers.length-1];
+            _stackersIds[_stackers[_stackers.length-1]] = _stackersIds[msg.sender];
+            delete _stackersIds[msg.sender];
+            _stackers.pop();
+        }
         
         return true;
     }
@@ -390,7 +393,7 @@ contract VirgoFarm is Context {
             maxIterations = _stackers.length.sub(_currentIteration);
             
         for(uint i = 0; i < maxIterations; i++){
-            address holder = _stackers[i];
+            address holder = _stackers[_currentIteration+i];
             uint256 toDistrib = _balances[holder].mul(_toDistributeThisRound).div(_lockedAmount);
             _balances[holder] = _balances[holder].add(toDistrib);
         }
@@ -400,5 +403,7 @@ contract VirgoFarm is Context {
             _distributed = _distributed.add(_toDistributeThisRound);
             _toDistributeThisRound = 0;
         }
+        
+        _currentIteration = _currentIteration.add(maxIterations);
     }
 }
