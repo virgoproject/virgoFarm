@@ -405,5 +405,7 @@ contract VirgoFarm is Context {
         }
         
         _currentIteration = _currentIteration.add(maxIterations);
+        
+        return true;
     }
 }
