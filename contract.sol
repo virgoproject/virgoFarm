@@ -424,6 +424,14 @@ contract VirgoFarm is Context {
         return true;
     }
     
+    /**
+     * Init a new distribution round, calculating how much to give this round, setting lastDistribution to current block height and
+     * reseting currentIteration
+     *
+     * Require that:
+     * enough blocks elasped since last distribution
+     * No distribution is already ongoing
+     */
     function initDistribution() external returns (bool) {
         require(_lastDistribution.add(_distributionInterval) <= block.number, "latest distribution is too recent");
         require(_toDistributeThisRound == 0, "current round not fully distributed");
@@ -440,7 +448,16 @@ contract VirgoFarm is Context {
         
         return true;
     }
-            
+    
+    /**
+     * distribute rewards for up to maxIterations stackers
+     * If end of stackers is not reached, next call to this function will start at the index it previously stopped
+     * If end of stackers is reached, end current distribution round
+     * This permit us to distribute rewards over several contract calls, preventing gas outage
+     *
+     * Require that:
+     * A distribution is ongoing
+     */
     function distribute(uint256 maxIterations) external returns (bool) {
         require(_toDistributeThisRound > 0, "no active round");
         if(_currentIteration.add(maxIterations) > _stackers.length)
