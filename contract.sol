@@ -276,7 +276,7 @@ contract VirgoFarm is Context {
     struct Stack {
         uint256 amount;
         uint256 effectiveAmount;
-        uint256 lockTime;
+        uint256 unlockTime;
         uint256 lockDuration;
         uint256 earnings;
         uint256 totalEarnings;
@@ -303,7 +303,6 @@ contract VirgoFarm is Context {
     uint256 constant _weeklyAdditionalRate = 485; //per 10000
     uint256 constant _maxPerInterval = 4331500000000;
     uint256 constant _minLockAmount = 10000000000;
-    uint256 constant _lockTime = 806400;
     uint256 constant _distributionInterval = 604800;
 
     constructor() public {}
@@ -371,6 +370,14 @@ contract VirgoFarm is Context {
         return true;
     }
 
+    function lock(uint256 amount, uint256 lockDuration) external returns (bool) {
+        return _lock(msg.sender, amount, lockDuration);
+    }
+
+    function lockFor(address account, uint256 amount, uint256 lockDuration) external onlyOwner returns (bool){
+        return _lock(account, amount, lockDuration);
+    }
+
     /**
      * Lock specified amount into the contract, transfering tokens from sender to contract and increasing sender's locked balance
      * If locked balance was 0 then add sender to stackers array, which we will iterate through during distribution
@@ -421,7 +428,12 @@ contract VirgoFarm is Context {
 
         Stack storage stack = _stacks[_stackersStacks[msg.sender][index]];
 
+        require(stack.unlockTime < block.timestamp, "Lock not expired yet");
+
         _token.transfer(msg.sender, stack.earnings.add(stack.amount));
+
+        _lockedAmount = _lockedAmount.sub(stack.amount);
+        _effectiveLock = _effectiveLock.sub(stack.effectiveAmount);
 
         _stacks[_stackersStacks[msg.sender][index]] = _stacks[_stacks.length-1];
         _stacks.pop();
@@ -443,13 +455,13 @@ contract VirgoFarm is Context {
         require(_lastDistribution.add(_distributionInterval) <= block.timestamp, "latest distribution is too recent");
         require(_toDistributeThisRound == 0, "current round not fully distributed");
 
-        _toDistributeThisRound = _lockedAmount.div(_perThousand.div(_baseWeeklyRate));
+        _toDistributeThisRound = _effectiveLock.div(_perThousand.div(_baseWeeklyRate));
         if(_toDistributeThisRound > _maxPerInterval)
             _toDistributeThisRound = _maxPerInterval;
 
         _currentIteration = 0;
 
-        _lastDistribution = block.number;
+        _lastDistribution = block.timestamp;
 
         return true;
     }
@@ -465,16 +477,17 @@ contract VirgoFarm is Context {
      */
     function distribute(uint256 maxIterations) external returns (bool) {
         require(_toDistributeThisRound > 0, "no active round");
-        if(_currentIteration.add(maxIterations) > _stackers.length)
-            maxIterations = _stackers.length.sub(_currentIteration);
+        if(_currentIteration.add(maxIterations) > _stacks.length)
+            maxIterations = _stacks.length.sub(_currentIteration);
 
         for(uint i = 0; i < maxIterations; i++){
-            address holder = _stackers[_currentIteration+i];
-            uint256 toDistrib = _balances[holder].mul(_toDistributeThisRound).div(_lockedAmount);
-            _balances[holder] = _balances[holder].add(toDistrib);
+            Stack stack = _stacks[_currentIteration+i];
+            uint256 toDistrib = stack.effectiveAmount.mul(_toDistributeThisRound).div(_effectiveLock);
+            stack.earnings = stack.earnings.add(toDistrib);
+            stack.totalEarnings = stack.totalEarnings.add(toDistrib);
         }
 
-        if(_currentIteration.add(maxIterations) == _stackers.length){
+        if(_currentIteration.add(maxIterations) == _stacks.length){
             _toDistribute = _toDistribute.sub(_toDistributeThisRound);
             _distributed = _distributed.add(_toDistributeThisRound);
             _toDistributeThisRound = 0;
