@@ -272,45 +272,56 @@ contract Context {
  */
 contract VirgoFarm is Context {
     using SafeMath for uint256;
-    
-    mapping (address => uint256) private _balances;
-    mapping (address => uint256) private _lockTimes;
-    address[] private _stackers;
-    mapping (address => uint256) private _stackersIds;
-    
+
+    struct Stack {
+        uint256 amount;
+        uint256 effectiveAmount;
+        uint256 lockTime;
+        uint256 lockDuration;
+        uint256 earnings;
+        uint256 totalEarnings;
+    }
+
+    Stack[] private _stacks;
+    mapping (address => uint256[]) _stackersStacks;
+
     IBEP20 constant _token = IBEP20(0xbEE5E147e6e40433ff0310f5aE1a66278bc8D678);
-    
+
     uint256 private _toDistribute = 0;
     uint256 private _distributed = 0;
     uint256 private _lastDistribution = 0;
-    
+
     uint256 private _toDistributeThisRound = 0;
     uint256 private _currentIteration = 0;
+
+    uint256 private _effectiveLock = 0;
     uint256 private _lockedAmount = 0;
-    
+
     uint256 constant _perThousand = 1000;
-    uint256 constant _baseWeeklyRate = 5; //per 1000
+    uint256 constant _tenThousand = 10000;
+    uint256 constant _baseWeeklyRate = 1; //per 1000
+    uint256 constant _weeklyAdditionalRate = 485; //per 10000
     uint256 constant _maxPerInterval = 4331500000000;
     uint256 constant _minLockAmount = 10000000000;
     uint256 constant _lockTime = 806400;
-    uint256 constant _distributionInterval = 201600;
-    
+    uint256 constant _distributionInterval = 604800;
+
     constructor() public {}
-    
+
     /**
      * Returns how much tokens the contract has at its disposal for distribution
      */
     function getToDistribute() external view returns (uint256) {
         return _toDistribute;
     }
-    
+
     /**
      * Returns how much tokens the contract has to distribute this round
      */
     function getToDistributeThisRound() external view returns (uint256) {
         return _toDistributeThisRound;
     }
-    
+
     /**
      * Returns how much tokens has been distributed since contract's start
      */
@@ -345,7 +356,7 @@ contract VirgoFarm is Context {
     function lockTimeOf(address account) external view returns (uint256) {
         return _lockTimes[account];
     }
-    
+
      /**
      * Add tokens to contract's distribution funds
      */
@@ -353,77 +364,73 @@ contract VirgoFarm is Context {
         require(amount > 0, "you must send tokens");
         uint256 allowance = _token.allowance(msg.sender, address(this));
         require(allowance >= amount, "Please allow token before adding funds");
-        
+
         _token.transferFrom(msg.sender, address(this), amount);
         _toDistribute = _toDistribute.add(amount);
-        
+
         return true;
     }
-    
+
     /**
      * Lock specified amount into the contract, transfering tokens from sender to contract and increasing sender's locked balance
      * If locked balance was 0 then add sender to stackers array, which we will iterate through during distribution
-     * 
+     *
      * Require that:
      * No distribution is occuring (toDistributeThisRound == 0)
      * Amount to lock is superior or equal to minimal lock amount
      * Sender's allowance is sufficient
      * Sender's balance is sufficient (or will revert on _token.transferFrom)
      */
-    function lock(uint256 amount) external returns (bool) {
+    function _lock(address account, uint256 amount, uint256 lockDuration) internal returns (bool) {
         require(_toDistributeThisRound == 0, "A distribution is occuring! Please try again in a few minutes.");
         require(amount >= _minLockAmount, "Lock amount must be greater or equal to minimal lock amount");
+        require(lockTime >= 1 && lockTime <= 104, "lockTime not in range");
         uint256 allowance = _token.allowance(msg.sender, address(this));
         require(allowance >= amount, "Please allow token before locking");
-        
+
         _token.transferFrom(msg.sender, address(this), amount);
-        
-        _balances[msg.sender] = _balances[msg.sender].add(amount);
-        _lockTimes[msg.sender] = block.number.add(_lockTime);
-        
-        if(_stackersIds[msg.sender] == 0){
-           _stackers.push(msg.sender);
-           _stackersIds[msg.sender] = _stackers.length;
-        }
-            
+
+        uint256 effectiveAmount = amount.mul(_tenThousand.add(_baseWeeklyRate.mul(lockDuration.sub(1)))).div(_tenThousand);
+
+        Stack stack = Stack(amount, effectiveAmount, block.timestamp.add(lockDuration.mul(604800)), lockDuration, 0);
+
+        _stacks.push(stack);
+        _stackersStacks[account].push(_stacks.length);
+
+        _lockedAmount = _lockedAmount.add(stack.amount);
+        _effectiveLock = _effectiveLock.add(stack.effectiveAmount);
+
         return true;
     }
-    
-    /**
-     * Unlock specified amount, withdrawing tokens from contract to sender
-     * If after this operation locked balance is zero, remove sender from stackers array 
-     *
-     * Require that:
-     * No distribution is occuring (toDistributeThisRound == 0)
-     * Amount to unlock is inferior or equal to sender's balance
-     * Amount is superior to zero
-     * Unlock block number is inferior or equal to current block number
-     */
-    function unlock(uint256 amount) external returns (bool) {
+
+    function retrieveEarnings(uint256 index) external returns (bool) {
+        require(index < _stackersStacks[msg.sender].length, "index out of range");
+
+        Stack storage stack = _stacks[_stackersStacks[msg.sender][index]];
+
+        require(stack.earnings > 0, "no earnings to retrieve");
+        _token.transfer(msg.sender, stack.earnings);
+        stack.earnings = 0;
+
+        return true;
+    }
+
+    function unlock(uint256 index) external returns (bool) {
         require(_toDistributeThisRound == 0, "A distribution is occuring! Please try again in a few minutes.");
-        require(amount > 0, "amount must be positive");
-        require(_balances[msg.sender] > 0, "Balance must not be null");
-        require(_lockTimes[msg.sender] <= block.number, "Lock not expired yet");
-        require(amount <= _balances[msg.sender], "amount must be inferior or equal to balance");
-        
-        // make sure that users can't continue to stack with less than minLockAmount, by increasing withdraw amount if necessary
-        if(_balances[msg.sender].sub(amount) < _minLockAmount){
-            amount = _balances[msg.sender];
-        }
-        
-        _token.transfer(msg.sender, amount);
-        _balances[msg.sender] = _balances[msg.sender].sub(amount);
-        
-        if(_balances[msg.sender] == 0){
-            _stackers[_stackersIds[msg.sender]-1] = _stackers[_stackers.length-1];
-            _stackersIds[_stackers[_stackers.length-1]] = _stackersIds[msg.sender];
-            delete _stackersIds[msg.sender];
-            _stackers.pop();
-        }
-        
+        require(index < _stackersStacks[msg.sender].length, "index out of range");
+
+        Stack storage stack = _stacks[_stackersStacks[msg.sender][index]];
+
+        _token.transfer(msg.sender, stack.earnings.add(stack.amount));
+
+        _stacks[_stackersStacks[msg.sender][index]] = _stacks[_stacks.length-1];
+        _stacks.pop();
+        _stackersStacks[msg.sender][index] = _stackersStacks[msg.sender][_stackersStacks[msg.sender].length-1];
+        _stackersStacks[msg.sender].pop();
+
         return true;
     }
-    
+
     /**
      * Init a new distribution round, calculating how much to give this round, setting lastDistribution to current block height and
      * reseting currentIteration
@@ -433,22 +440,20 @@ contract VirgoFarm is Context {
      * No distribution is already ongoing
      */
     function initDistribution() external returns (bool) {
-        require(_lastDistribution.add(_distributionInterval) <= block.number, "latest distribution is too recent");
+        require(_lastDistribution.add(_distributionInterval) <= block.timestamp, "latest distribution is too recent");
         require(_toDistributeThisRound == 0, "current round not fully distributed");
-
-        _lockedAmount = _token.balanceOf(address(this)).sub(_toDistribute);
 
         _toDistributeThisRound = _lockedAmount.div(_perThousand.div(_baseWeeklyRate));
         if(_toDistributeThisRound > _maxPerInterval)
             _toDistributeThisRound = _maxPerInterval;
-        
+
         _currentIteration = 0;
-        
+
         _lastDistribution = block.number;
-        
+
         return true;
     }
-    
+
     /**
      * distribute rewards for up to maxIterations stackers
      * If end of stackers is not reached, next call to this function will start at the index it previously stopped
@@ -462,21 +467,21 @@ contract VirgoFarm is Context {
         require(_toDistributeThisRound > 0, "no active round");
         if(_currentIteration.add(maxIterations) > _stackers.length)
             maxIterations = _stackers.length.sub(_currentIteration);
-            
+
         for(uint i = 0; i < maxIterations; i++){
             address holder = _stackers[_currentIteration+i];
             uint256 toDistrib = _balances[holder].mul(_toDistributeThisRound).div(_lockedAmount);
             _balances[holder] = _balances[holder].add(toDistrib);
         }
-        
+
         if(_currentIteration.add(maxIterations) == _stackers.length){
             _toDistribute = _toDistribute.sub(_toDistributeThisRound);
             _distributed = _distributed.add(_toDistributeThisRound);
             _toDistributeThisRound = 0;
         }
-        
+
         _currentIteration = _currentIteration.add(maxIterations);
-        
+
         return true;
     }
 }
