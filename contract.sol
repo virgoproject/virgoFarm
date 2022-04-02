@@ -437,11 +437,11 @@ contract VirgoFarm is Context, Ownable {
     }
 
     function lock(uint256 amount, uint256 lockDuration) external returns (bool) {
-        return _lock(msg.sender, amount, lockDuration);
+        return _lock(msg.sender, amount, lockDuration, false);
     }
 
     function lockFor(address account, uint256 amount, uint256 lockDuration) onlyOwner external returns (bool){
-        return _lock(account, amount, lockDuration);
+        return _lock(account, amount, lockDuration, true);
     }
 
     /**
@@ -454,7 +454,7 @@ contract VirgoFarm is Context, Ownable {
      * Sender's allowance is sufficient
      * Sender's balance is sufficient (or will revert on _token.transferFrom)
      */
-    function _lock(address account, uint256 amount, uint256 lockDuration) internal returns (bool) {
+    function _lock(address account, uint256 amount, uint256 lockDuration, bool bypassLock) internal returns (bool) {
         require(_toDistributeThisRound == 0, "A distribution is occuring! Please try again in a few minutes.");
         require(amount >= _minLockAmount, "Lock amount must be greater or equal to minimal lock amount");
         require(lockDuration >= 1 && lockDuration <= 104, "lockTime not in range");
@@ -465,7 +465,12 @@ contract VirgoFarm is Context, Ownable {
 
         uint256 effectiveAmount = amount.mul(_tenThousand.add(_weeklyAdditionalRate.mul(lockDuration.sub(1)))).div(_tenThousand);
 
-        Stack memory stack = Stack(amount, effectiveAmount, block.timestamp.add(lockDuration.mul(604800)), lockDuration, 0, 0);
+        uint256 lockTime = block.timestamp.add(lockDuration.mul(604800));
+        if(bypassLock) {
+            lockTime = 0;
+        }
+
+        Stack memory stack = Stack(amount, effectiveAmount, lockTime, lockDuration, 0, 0);
 
         _stacks.push(stack);
         _stackersStacks[account].push(_stacks.length-1);
