@@ -356,7 +356,7 @@ contract VirgoFarm is Context, Ownable {
     Stack[] private _stacks;
     mapping (address => uint256[]) _stackersStacks;
 
-    IBEP20 constant _token = IBEP20(0xFb526228ff1C019E4604C7e7988C097D96bD5b70);
+    IBEP20 constant _token = IBEP20(0x72f3e1Ad709dCd81Abb4b51b432ab6B97568e38a);
 
     uint256 private _toDistribute = 0;
     uint256 private _distributed = 0;
