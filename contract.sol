@@ -351,12 +351,14 @@ contract VirgoFarm is Context, Ownable {
         uint256 lockDuration;
         uint256 earnings;
         uint256 totalEarnings;
+        address owner;
+        uint256 index;
     }
 
     Stack[] private _stacks;
     mapping (address => uint256[]) _stackersStacks;
 
-    IBEP20 constant _token = IBEP20(0x72f3e1Ad709dCd81Abb4b51b432ab6B97568e38a);
+    IBEP20 constant _token = IBEP20(0xbEE5E147e6e40433ff0310f5aE1a66278bc8D678);
 
     uint256 private _toDistribute = 0;
     uint256 private _distributed = 0;
@@ -374,7 +376,7 @@ contract VirgoFarm is Context, Ownable {
     uint256 constant _weeklyAdditionalRate = 485; //per 10000
     uint256 constant _maxPerInterval = 4331500000000;
     uint256 constant _minLockAmount = 10000000000;
-    uint256 constant _distributionInterval = 120;
+    uint256 constant _distributionInterval = 200;
 
     constructor() public {}
 
@@ -440,8 +442,8 @@ contract VirgoFarm is Context, Ownable {
         return _lock(msg.sender, amount, lockDuration, false);
     }
 
-    function lockFor(address account, uint256 amount, uint256 lockDuration) onlyOwner external returns (bool){
-        return _lock(account, amount, lockDuration, true);
+    function lockFor(address account, uint256 amount, uint256 lockDuration, bool bypassLock) onlyOwner external returns (bool){
+        return _lock(account, amount, lockDuration, bypassLock);
     }
 
     /**
@@ -470,7 +472,7 @@ contract VirgoFarm is Context, Ownable {
             lockTime = 0;
         }
 
-        Stack memory stack = Stack(amount, effectiveAmount, lockTime, lockDuration, 0, 0);
+        Stack memory stack = Stack(amount, effectiveAmount, lockTime, lockDuration, 0, 0, account, _stackersStacks[account].length);
 
         _stacks.push(stack);
         _stackersStacks[account].push(_stacks.length-1);
@@ -506,7 +508,10 @@ contract VirgoFarm is Context, Ownable {
         _lockedAmount = _lockedAmount.sub(stack.amount);
         _effectiveLock = _effectiveLock.sub(stack.effectiveAmount);
 
+        Stack memory otherStack = _stacks[_stacks.length-1];
+
         _stacks[_stackersStacks[msg.sender][index]] = _stacks[_stacks.length-1];
+        _stackersStacks[otherStack.owner][otherStack.index] = _stackersStacks[msg.sender][index];
         _stacks.pop();
         _stackersStacks[msg.sender][index] = _stackersStacks[msg.sender][_stackersStacks[msg.sender].length-1];
         _stackersStacks[msg.sender].pop();
